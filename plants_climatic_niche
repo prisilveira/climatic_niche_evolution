@@ -1,0 +1,343 @@
+rm(list=ls())
+
+
+library(raster)
+###### load tables and rasters
+
+ocor<-read.csv("C:/Users/piken/Desktop/mauritia/Ocorrencias/occ_spp.csv", sep = ";")
+
+setwd("C:/Users/piken/Desktop/mauritia")
+biovar<-stack(list.files("C:/Users/piken/Desktop/mauritia/bioclimatic", pattern = "\\.tif$", full.names = TRUE))
+
+#####################################################
+
+nichevar=extract(biovar, ocor[,c(2,3)])
+nichevar=cbind(nichevar, ocor[,c(1:3)])
+nichecells=cellFromXY(biovar,nichevar[c(8,9)])
+nichevar$cell<-nichecells
+
+write.csv(nichevar, "nichevar.csv")
+###################################################
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+data_long <- nichevar %>%
+  pivot_longer(cols = starts_with("bio"), # Seleciona colunas que começam com "bio"
+               names_to = "bio_variable", # Nome da coluna com as variáveis
+               values_to = "value")
+head(data_long)
+facet_labels=c("bio1"="Annual Mean Temperature", "bio12"="Annual Precipiation", "bio14"="Prec. Driest Month",
+              "bio15"="Prec. Seasonality", "bio4"="Temp. Seasonality", "bio6"="Min. Temp. Coldest Month")
+
+ggplot(data_long, aes(y = value, fill = sp)) +
+  geom_boxplot() +
+  facet_wrap(~ bio_variable, scales = "free_y", labeller = labeller(bio_variable = facet_labels)) +
+  theme_bw() +
+  labs(
+    title = "Variation in environmental variables across Mauritiidae palm species",
+    x = "Environmental variables",
+    y = "Values",
+    fill = "Species"
+  ) +
+  theme( text=element_text(family = "serif"),
+    axis.text.x = element_text(angle = 45, hjust = 1),  panel.grid = element_blank(),
+        plot.title = element_text(size = 14, face = "bold", family = "serif"),
+        axis.title = element_text(size = 14, family = "serif"),
+        strip.text = element_text(size = 14, face = "bold", family = "serif"),
+        legend.title=element_text(size=14), 
+        legend.text=element_text(size=12))
+
+#####################################################################
+#################### Calculating niche parameters ##################
+#####################################################################
+biovar_lten= nichevar[nichevar[,"sp"]=="Lten",]
+biovar_macu= nichevar[nichevar[,"sp"]=="Macu", ]
+biovar_mmac= nichevar[nichevar[,"sp"]=="Mmac", ]
+biovar_marm= nichevar[nichevar[,"sp"]=="Marm", ]
+biovar_mdis= nichevar[nichevar[,"sp"]=="Mdis", ]
+biovar_mcar= nichevar[nichevar[,"sp"]=="Mcar", ]
+biovar_mfle= nichevar[nichevar[,"sp"]=="Mfle", ]
+biovar_mpu= nichevar[nichevar[,"sp"]=="Mpu", ]
+
+######### retaining unique cells ############
+# Remover duplicatas com base na coluna 'cell'
+
+library(dplyr)
+biovar_lten <-biovar_lten %>%
+  distinct(cell, .keep_all = TRUE)
+biovar_macu <-biovar_macu %>%
+  distinct(cell, .keep_all = TRUE)
+biovar_mmac <-biovar_mmac %>%
+  distinct(cell, .keep_all = TRUE)
+biovar_marm <-biovar_marm %>%
+  distinct(cell, .keep_all = TRUE)
+biovar_mdis <-biovar_mdis %>%
+  distinct(cell, .keep_all = TRUE)
+biovar_mcar <-biovar_mcar %>%
+  distinct(cell, .keep_all = TRUE)
+biovar_mfle <-biovar_mfle %>%
+  distinct(cell, .keep_all = TRUE)
+biovar_mpu <-biovar_mpu %>%
+  distinct(cell, .keep_all = TRUE)
+
+###### calculating statistics ##################
+#library(dplyr)
+library(purrr)
+#library(tidyr)
+tablist<-list(biovar_lten, biovar_macu, biovar_marm, biovar_mcar, biovar_mdis, biovar_mfle, biovar_mmac, biovar_mpu)
+
+calcula_estatisticas_tidy <- function(tabela) {
+  especie <- unique(tabela$sp) # Obtém o nome da espécie (assume que cada tabela tem uma única espécie)
+  tabela %>%
+    select(starts_with("bio")) %>% # Seleciona colunas que começam com "bio"
+    summarise(
+      across(everything(), list(
+        media = mean,
+        mediana = median,
+        desvio_padrao = sd,
+        variancia = var
+      ), .names = "{.col}_{.fn}")
+    ) %>%
+    pivot_longer(
+      cols = everything(),
+      names_to = c("variavel", "estatistica"),
+      names_sep = "_"
+    ) %>%
+    pivot_wider(
+      names_from = "variavel",
+      values_from = "value"
+    ) %>%
+    mutate(especie = especie) # Adiciona a coluna com o nome da espécie
+}
+
+# Aplicar a função a todas as tabelas e combinar os resultados
+estatisticas_todas_tidy <- tablist %>%
+  map(calcula_estatisticas_tidy) %>% # Aplica a função em cada tabela
+  bind_rows(.id = "tabela") # Combina os resultados e adiciona o identificador da tabela
+
+# Exibindo o resultado organizado
+head(estatisticas_todas_tidy)
+biovar_stats<-as.data.frame(estatisticas_todas_tidy)
+head(biovar_stats)
+#write.csv(biovar_stats, "biovar_stats.csv")
+
+
+#library(dplyr)
+#library(tidyr)
+
+# Reorganizando o output
+estatisticas_final <- estatisticas_todas_tidy %>%
+  pivot_longer(
+    cols = starts_with("bio"), # Seleciona colunas que começam com "bio"
+    names_to = "variavel",     # Converte colunas em formato longo
+    values_to = "valor"
+  ) %>%
+  unite("estatistica_variavel", estatistica, variavel, sep = "_") %>% # Combina estatística e variável em uma única coluna
+  pivot_wider(
+    names_from = "estatistica_variavel", # Cria colunas combinando estatísticas e variáveis
+    values_from = "valor"                # Preenche com os valores
+  ) %>%
+  select(especie, everything()) # Mantém "especie" como a primeira coluna
+
+# Exibindo o resultado
+print(estatisticas_final)
+#write.csv(estatisticas_final, "estatisticas_final.csv")
+
+# Ordem desejada das espécies na arvore filogenetica
+ordem_especies <- c("Lten", "Macu", "Mmac", "Marm", "Mdis", "Mcar", "Mfle")
+
+# Reorganizando a tabela
+tab_traits <- estatisticas_final %>%
+  mutate(especie = factor(especie, levels = ordem_especies)) %>% # Define a ordem como fator
+  arrange(especie) # Reordena com base na nova ordem
+
+# Exibindo o resultado
+print(tab_traits)
+
+
+#write.csv(tab_traits, "tab_traits.csv")
+tab_traits<-tab_traits[-8,]
+
+#####################################################################
+#################### PVR - Niche evolution ##########################
+#####################################################################
+library(PVR)
+
+library(ape)
+tree <- read.tree(text = "(Lten: 56.1936, ((((Macu: 7.3145, Mmac: 7.3145) [&95%HPD={1.44056, 15.8325}]: 8.6841, Marm: 15.9987) [&95%HPD={6.12417, 28.2844}]: 12.2396, Mdis: 28.2382) [&95%HPD={13.1114, 43.8163}]: 16.0105, (Mcar: 3.5969, Mfle: 3.5969) [&95%HPD={2.8216, 4.0922}]: 40.6518) [&95%HPD={27.3523, 61.855}]: 11.9449) [&95%HPD={47.5877, 65.7819}];")
+plot(tree)
+
+tree$tip.label
+
+x <- PVRdecomp(tree)
+
+# Função que aplica o PSR e seus resultados para cada coluna
+aplicar_psr <- function(nome_coluna, x, tab_traits) {
+  # Obtém a coluna de interesse do dataframe tab_traits
+  estatistica <- tab_traits[[nome_coluna]]
+  
+  # Aplica a função PSR
+  y <- PSR(x, estatistica, null.model = TRUE, Brownian.model = TRUE, times = 99)
+  
+  # Exibe os resultados
+  print(paste("Resultados para a coluna:", nome_coluna))
+  print(summary(y))
+  print(y)
+  
+  # Plota o gráfico do PSR
+  PSRplot(y, info="both")
+}
+
+# Lista de todas as colunas de estatísticas a serem aplicadas (exemplo: media_bio1, mediana_bio1, etc.)
+colunas_estatisticas <- colnames(tab_traits)[grepl("bio", colnames(tab_traits))]
+
+# Aplicar a função PSR para cada coluna
+# Vamos supor que 'x' seja um objeto necessário para a função PSR (substitua pela variável adequada)
+psr_results<-map(colunas_estatisticas, ~aplicar_psr(.x, x, tab_traits))
+
+
+############################ Ancestral state reconstruction ################################################
+library(phytools)
+tab_traits<-read.csv("tab_traits.csv", sep = ";")
+
+################################ MCMC ancestral Bayes
+
+################## Bio 1
+mean.bio1<-tab_traits$media_bio1
+names(mean.bio1)<-tab_traits$especie
+
+maurit.mcmc<-anc.Bayes(tree, mean.bio1, ngen = 50000)
+maurit.ace<-summary(maurit.mcmc)
+
+maurit.contMap<-contMap(tree, mean.bio1,anc.states=maurit.ace, plot=TRUE)
+
+maurit.contMap2<-setMap(maurit.contMap, viridisLite::viridis(n=10,direction=-1))
+
+plot(maurit.contMap2, ftype="i",fsize=c(1,1), leg.txt="Mean annual temperature (BIO1)",lwd=8)
+nodelabels(frame="circle",bg="white",cex=0.6)    
+
+psr_bio1 <- PSR(x, mean.bio1, null.model = TRUE, Brownian.model = TRUE, times = 99)
+PSRplot(psr_bio1, info = "both")
+title(main = "PSR plots BIO 1")
+
+#################### Bio 4
+mean.bio4<-tab_traits$media_bio4
+names(mean.bio4)<-tab_traits$especie
+
+maurit.contMap<-contMap(tree, mean.bio4,anc.states=maurit.ace, plot=TRUE)
+
+maurit.contMap2<-setMap(maurit.contMap, viridisLite::viridis(n=10,direction=-1))
+
+plot(maurit.contMap2, ftype="i",fsize=c(1,1), leg.txt="Temperature sazonality (BIO4)",lwd=8)
+nodelabels(frame="circle",bg="white",cex=0.6)
+
+psr_bio4 <- PSR(x, mean.bio4, null.model = TRUE, Brownian.model = TRUE, times = 99)
+PSRplot(psr_bio4, info = "both")
+title(main = "PSR plots BIO 4")
+
+#################### Bio 6
+mean.bio6<-tab_traits$media_bio6
+names(mean.bio6)<-tab_traits$especie
+maurit.mcmc<-anc.Bayes(tree, mean.bio6, ngen = 50000)
+maurit.ace<-summary(maurit.mcmc)
+
+maurit.contMap<-contMap(tree, mean.bio6,anc.states=maurit.ace, plot=TRUE)
+
+maurit.contMap2<-setMap(maurit.contMap, viridisLite::viridis(n=10,direction=-1))
+
+plot(maurit.contMap2, ftype="i",fsize=c(1,1), leg.txt="Mean temperature coldest quarter (BIO6)",lwd=8)
+nodelabels(frame="circle",bg="white",cex=0.6)    
+
+
+psr_bio6 <- PSR(x, mean.bio6, null.model = TRUE, Brownian.model = TRUE, times = 99)
+PSRplot(psr_bio6, info = "both")
+title(main = "PSR plots BIO 6")
+
+###################### Bio 12
+mean.bio12<-tab_traits$media_bio12
+names(mean.bio12)<-tab_traits$especie
+maurit.mcmc<-anc.Bayes(tree, mean.bio12, ngen = 50000)
+maurit.ace<-summary(maurit.mcmc)
+
+maurit.contMap<-contMap(tree, mean.bio6,anc.states=maurit.ace, plot=TRUE)
+
+maurit.contMap2<-setMap(maurit.contMap, viridisLite::viridis(n=10,direction=-1))
+
+plot(maurit.contMap2, ftype="i",fsize=c(1,1), leg.txt="Mean annual precipitation (BIO12)",lwd=8)
+nodelabels(frame="circle",bg="white",cex=0.6)    
+
+
+psr_bio12 <- PSR(x, mean.bio12, null.model = TRUE, Brownian.model = TRUE, times = 99)
+PSRplot(psr_bio12, info = "both")
+title(main = "PSR plots BIO 12")
+
+###################### Bio 14
+mean.bio14<-tab_traits$media_bio14
+names(mean.bio14)<-tab_traits$especie
+maurit.mcmc<-anc.Bayes(tree, mean.bio12, ngen = 50000)
+maurit.ace<-summary(maurit.mcmc)
+
+maurit.contMap<-contMap(tree, mean.bio6,anc.states=maurit.ace, plot=TRUE)
+
+maurit.contMap2<-setMap(maurit.contMap, viridisLite::viridis(n=10,direction=-1))
+
+plot(maurit.contMap2, ftype="i",fsize=c(1,1), leg.txt="Prec. driest quarter (BIO14)",lwd=8)
+nodelabels(frame="circle",bg="white",cex=0.6)    
+
+
+psr_bio14 <- PSR(x, mean.bio14, null.model = TRUE, Brownian.model = TRUE, times = 99)
+PSRplot(psr_bio14, info = "both")
+title(main = "PSR plots BIO 14")
+
+###################### Bio 15
+mean.bio15<-tab_traits$media_bio15
+names(mean.bio15)<-tab_traits$especie
+maurit.mcmc<-anc.Bayes(tree, mean.bio12, ngen = 50000)
+maurit.ace<-summary(maurit.mcmc)
+
+maurit.contMap<-contMap(tree, mean.bio6,anc.states=maurit.ace, plot=TRUE)
+
+maurit.contMap2<-setMap(maurit.contMap, viridisLite::viridis(n=10,direction=-1))
+
+plot(maurit.contMap2, ftype="i",fsize=c(1,1), leg.txt="Precipitation sazonality (BIO15)",lwd=8)
+nodelabels(frame="circle",bg="white",cex=0.6)    
+
+
+psr_bio15 <- PSR(x, mean.bio15, null.model = TRUE, Brownian.model = TRUE, times = 99)
+PSRplot(psr_bio15, info = "both")
+PSRplot(psr_bio15, info = "null")
+PSRplot(psr_bio15, info = "Brownian")
+PSRplot(psr_bio15, info = "area")
+
+
+title(main = "PSR plots BIO 15") # 11.03313 21.72229 cm / 4.343750 8.552083 inches
+
+psr_list<-list("psr_bio1", "psr_bio4", "psr_bio6", "psr_bio12", "psr_bio14", "psr_bio15")
+psr_obj<-list(psr_bio1, psr_bio4, psr_bio6, psr_bio12, psr_bio14, psr_bio15)
+
+
+#save plots in tiff format
+for (i in 1:length(psr_list)) {
+  # Set the filename dynamically
+  tiff_filename <- paste0("C:/Users/piken/Desktop/mauritia/Figures", "/", psr_list[i], ".tiff")
+  
+  # Open the TIFF device with 300 DPI resolution
+  tiff(tiff_filename, width =4.343750 , height = 8.552083, units = "in", res = 300)
+  
+  # Create a PSR plot using the PSRplot function
+  PSRplot(psr_obj[[i]], info="both")
+  title(main=paste(psr_list[i]))
+  
+  # Close the TIFF device to save the plot
+  dev.off()
+  print(i)
+}
+
+
+####### rates and evolutionary correlations between traits are allowed to vary
+#as a function of a set of mapped regimes on the tree.
+#The underlying motivation of this method is to test hypotheses about phylogenetic heterogeneity
+#in the evolutionary relationship (i.e., correlation) between different traits on our phylogeny.
+#This approach is also used to study quantitative trait modularity and integration during macroevolution
+#(e.g., Damian-Serrano, Haddock & Dunn, 2021). Ver Mitov et al 2019 
